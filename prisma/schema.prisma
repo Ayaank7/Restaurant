@@ -1,0 +1,100 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+// 1. MENU ITEMS: What the customer actually buys
+model MenuItem {
+  id                String             @id @default(uuid())
+  name              String
+  price             Float
+  category          String
+  taxRate           Float              @default(0) // ENTERPRISE: e.g., 5 for 5% GST
+  isActive          Boolean            @default(true)
+  
+  // Relations
+  recipeIngredients RecipeIngredient[]
+  orderItems        OrderItem[]
+
+  @@map("menu_items")
+}
+
+// 2. INVENTORY: Raw materials in the kitchen
+model InventoryItem {
+  id                String             @id @default(uuid())
+  name              String
+  unit              String             // e.g., 'grams', 'ml', 'pieces'
+  currentStock      Float              @default(0)
+  minimumStockLevel Float              @default(0)
+  
+  // Relations
+  recipeIngredients RecipeIngredient[]
+
+  @@map("inventory_items")
+}
+
+// 3. RECIPE (BILL OF MATERIALS): The junction table linking dishes to raw ingredients
+model RecipeIngredient {
+  id               String        @id @default(uuid())
+  quantityRequired Float         // e.g., 150 (grams of dough)
+
+  // Relations
+  menuItem         MenuItem      @relation(fields: [menuItemId], references: [id])
+  menuItemId       String
+  inventoryItem    InventoryItem @relation(fields: [inventoryItemId], references: [id])
+  inventoryItemId  String
+
+  @@map("recipe_ingredients")
+}
+
+// 4. ORDERS: Tracking sales & billing
+model Order {
+  id             String      @id @default(uuid())
+  tableId        String
+  status         String      // 'pending', 'preparing', 'ready', 'served', 'paid'
+  
+  // ENTERPRISE BILLING FIELDS
+  subTotal       Float       @default(0)
+  taxAmount      Float       @default(0)
+  discountAmount Float       @default(0)
+  totalAmount    Float       // The final Grand Total
+
+  createdAt      DateTime    @default(now())
+  
+  // Relations
+  orderItems     OrderItem[]
+  discountId     String?
+  discount       Discount?   @relation(fields: [discountId], references: [id])
+
+  @@map("orders")
+}
+
+// 5. ORDER ITEMS: Individual items inside an order
+model OrderItem {
+  id         String   @id @default(uuid())
+  quantity   Int
+
+  // Relations
+  order      Order    @relation(fields: [orderId], references: [id])
+  orderId    String
+  menuItem   MenuItem @relation(fields: [menuItemId], references: [id])
+  menuItemId String
+
+  @@map("order_items")
+}
+
+// 6. DISCOUNTS: The Discount Engine
+model Discount {
+  id          String   @id @default(uuid())
+  code        String   @unique // e.g., "STAFF50", "FESTIVAL200"
+  type        String   // 'PERCENTAGE' or 'FLAT'
+  value       Float    // e.g., 50 (for 50%) or 200 (for ₹200 off)
+  isActive    Boolean  @default(true)
+  
+  orders      Order[]
+
+  @@map("discounts")
+}
