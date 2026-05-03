@@ -17,7 +17,7 @@ dist-ssr
 .nitro
 *.local
 
-# Wrangler / Cloudflare
+# Generated deploy artifacts
 .wrangler/
 .dev.vars
 
@@ -32,4 +32,3 @@ dist-ssr
 *.sln
 *.sw?
 
-/src/generated/prisma

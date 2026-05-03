@@ -47,6 +47,12 @@ export interface Order {
   tableId: string;
   items: OrderLineItem[];
   status: OrderStatus;
+  inventoryDeductedAt?: number | null;
+  discountCode?: string | null;
+  subTotal?: number;
+  taxAmount?: number;
+  discountAmount?: number;
+  totalAmount?: number;
   createdAt: number;
   updatedAt: number;
 }

@@ -107,22 +107,6 @@ export function listMenu() {
 }
 
 // ========= Orders & Inventory =========
-function deductInventory(items: OrderLineItem[]) {
-  const store = getStore();
-  let changed = false;
-  for (const line of items) {
-    const recipes = store.recipes.filter((r) => r.menuItemId === line.menuItemId);
-    for (const recipe of recipes) {
-      const inv = store.inventory.find((i) => i.ingredient === recipe.ingredient);
-      if (inv) {
-        inv.stock = Math.max(0, inv.stock - recipe.quantityRequired * line.quantity);
-        changed = true;
-      }
-    }
-  }
-  if (changed) publish({ type: "INVENTORY_UPDATED", inventory: [...store.inventory] });
-}
-
 export function createOrder(input: {
   sessionId: string;
   items: { menuItemId: string; quantity: number; notes?: string }[];
@@ -152,11 +136,12 @@ export function createOrder(input: {
     tableId: session.tableId,
     items,
     status: "pending",
+    inventoryDeductedAt: null,
+    discountCode: null,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
   store.orders.push(order);
-  deductInventory(items);
   publish({ type: "ORDER_CREATED", order });
   return order;
 }

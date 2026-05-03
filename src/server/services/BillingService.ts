@@ -1,4 +1,20 @@
-import { prisma } from "../db/prisma";
+import { getStore } from "../store";
+
+type DiscountDefinition = {
+  code: string;
+  type: "PERCENTAGE" | "FLAT";
+  value: number;
+  isActive: boolean;
+};
+
+const DISCOUNTS: DiscountDefinition[] = [
+  { code: "STAFF50", type: "PERCENTAGE", value: 50, isActive: true },
+  { code: "FESTIVAL200", type: "FLAT", value: 200, isActive: true },
+];
+
+function findDiscount(code: string) {
+  return DISCOUNTS.find((discount) => discount.code.toLowerCase() === code.toLowerCase());
+}
 
 export class BillingService {
   /**
@@ -6,41 +22,30 @@ export class BillingService {
    * Call this whenever an item is added to an order, or a discount code is applied.
    */
   static async calculateBill(orderId: string, discountCode?: string) {
-    // 1. Fetch the order and all its items with their menu prices & taxes
-    const order = await prisma.order.findUnique({
-      where: { id: orderId },
-      include: {
-        orderItems: { include: { menuItem: true } },
-      },
-    });
+    const store = getStore();
+    const order = store.orders.find((candidate) => candidate.id === orderId);
 
     if (!order) throw new Error("Order not found");
 
     let subTotal = 0;
     let taxAmount = 0;
 
-    // 2. ITEM-LEVEL CALCULATION (Subtotal & Taxes)
-    for (const item of order.orderItems) {
-      const itemTotal = item.quantity * item.menuItem.price;
+    for (const item of order.items) {
+      const itemTotal = item.quantity * item.price;
       subTotal += itemTotal;
 
-      // Calculate tax for this specific item (e.g., 5% GST)
-      const itemTax = itemTotal * (item.menuItem.taxRate / 100);
+      const itemTax = itemTotal * 0.08;
       taxAmount += itemTax;
     }
 
-    // 3. DISCOUNT ENGINE
     let discountAmount = 0;
-    let appliedDiscountId = order.discountId; // Keep existing discount if any
+    let appliedDiscountCode = order.discountCode ?? null;
 
-    // If a new discount code was provided by the waiter/admin
     if (discountCode) {
-      const discount = await prisma.discount.findUnique({
-        where: { code: discountCode },
-      });
+      const discount = findDiscount(discountCode);
 
       if (discount && discount.isActive) {
-        appliedDiscountId = discount.id;
+        appliedDiscountCode = discount.code;
         if (discount.type === "PERCENTAGE") {
           discountAmount = subTotal * (discount.value / 100);
         } else if (discount.type === "FLAT") {
@@ -50,11 +55,8 @@ export class BillingService {
         throw new Error("Invalid or expired discount code");
       }
     }
-    // Re-calculate existing discount if order was updated
-    else if (order.discountId) {
-      const existingDiscount = await prisma.discount.findUnique({
-        where: { id: order.discountId },
-      });
+    else if (order.discountCode) {
+      const existingDiscount = findDiscount(order.discountCode);
       if (existingDiscount) {
         if (existingDiscount.type === "PERCENTAGE") {
           discountAmount = subTotal * (existingDiscount.value / 100);
@@ -64,23 +66,23 @@ export class BillingService {
       }
     }
 
-    // Ensure discount doesn't exceed subtotal
     if (discountAmount > subTotal) discountAmount = subTotal;
 
-    // 4. FINAL GRAND TOTAL CALCULATION
     const grandTotal = subTotal - discountAmount + taxAmount;
 
-    // 5. UPDATE THE ORDER IN THE DATABASE
-    const updatedOrder = await prisma.order.update({
-      where: { id: orderId },
-      data: {
-        subTotal,
-        taxAmount,
-        discountAmount,
-        totalAmount: grandTotal,
-        discountId: appliedDiscountId,
-      },
-    });
+    const updatedOrder = {
+      ...order,
+      subTotal,
+      taxAmount,
+      discountAmount,
+      totalAmount: grandTotal,
+      discountCode: appliedDiscountCode,
+      updatedAt: Date.now(),
+    };
+
+    store.orders = store.orders.map((candidate) =>
+      candidate.id === orderId ? updatedOrder : candidate,
+    );
 
     return {
       subTotal,

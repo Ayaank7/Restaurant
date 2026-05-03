@@ -1,4 +1,5 @@
-import { prisma } from '../db/prisma';
+import { getStore } from '../store';
+import { publish } from '../events';
 
 export class InventoryService {
   /**
@@ -6,39 +7,44 @@ export class InventoryService {
    * Call this when an order status changes to 'paid' or 'served'.
    */
   static async deductInventoryForOrder(orderId: string) {
-    // 1. Fetch the full order and its items
-    const order = await prisma.order.findUnique({
-      where: { id: orderId },
-      include: { orderItems: true },
-    });
+    const store = getStore();
+    const order = store.orders.find((candidate) => candidate.id === orderId);
 
     if (!order) {
       throw new Error('Order not found');
     }
 
-    // 2. Loop through every item the customer ordered (e.g., 2 Margherita Pizzas)
-    for (const item of order.orderItems) {
-      
-      // 3. Look up the exact recipe (BOM) for this menu item
-      const recipeIngredients = await prisma.recipeIngredient.findMany({
-        where: { menuItemId: item.menuItemId },
-      });
+    if (order.inventoryDeductedAt) {
+      return { success: true, message: 'Inventory already synced for this order.' };
+    }
 
-      // 4. Deduct the raw materials from the main inventory
-      for (const recipe of recipeIngredients) {
-        // Calculation: Recipe requires 150g dough * 2 pizzas = 300g total deduction
+    let inventoryChanged = false;
+
+    for (const item of order.items) {
+      const recipes = store.recipes.filter((recipe) => recipe.menuItemId === item.menuItemId);
+
+      for (const recipe of recipes) {
+        const inventoryItem = store.inventory.find((candidate) => candidate.ingredient === recipe.ingredient);
+        if (!inventoryItem) {
+          continue;
+        }
+
         const totalAmountToDeduct = recipe.quantityRequired * item.quantity;
-
-        await prisma.inventoryItem.update({
-          where: { id: recipe.inventoryItemId },
-          data: {
-            currentStock: {
-              decrement: totalAmountToDeduct, // Prisma's atomic decrement safely lowers the stock
-            },
-          },
-        });
+        inventoryItem.stock = Math.max(0, inventoryItem.stock - totalAmountToDeduct);
+        inventoryChanged = true;
       }
     }
+
+    if (inventoryChanged) {
+      publish({ type: 'INVENTORY_UPDATED', inventory: [...store.inventory] });
+    }
+
+    store.orders = store.orders.map((candidate) =>
+      candidate.id === orderId
+        ? { ...candidate, inventoryDeductedAt: Date.now(), updatedAt: Date.now() }
+        : candidate,
+    );
+    publish({ type: 'ORDER_UPDATED', order: store.orders.find((candidate) => candidate.id === orderId)! });
 
     return { success: true, message: 'Inventory strictly synced with Bill of Materials.' };
   }
